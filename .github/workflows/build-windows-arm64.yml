@@ -16,7 +16,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-  VCPKG_BINARY_SOURCES: 'clear;nuget,GitHub,readwrite'
 
 jobs:
   build-windows-arm64:
@@ -38,12 +37,15 @@ jobs:
           target: aarch64-pc-windows-msvc
           override: true
       
-      # 设置 vcpkg
+      # 手动设置 vcpkg (不使用 lukka/run-vcpkg)
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: '2023.04.15'
-          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git ${{ github.workspace }}/vcpkg
+          cd ${{ github.workspace }}/vcpkg
+          # 使用对应 2023.04.15 版本的完整 SHA1 哈希
+          git checkout f14984af3738e69f197bf0e647a8dca12de92996
+          ./bootstrap-vcpkg.bat
+        shell: pwsh
       
       # 安装 ARM64 依赖
       - name: Install ARM64 dependencies
