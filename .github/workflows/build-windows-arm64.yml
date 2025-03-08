@@ -1,0 +1,120 @@
+name: Build RustDesk Windows ARM64
+
+on:
+  workflow_dispatch:  # 允许手动触发
+  push:
+    branches: [ main, master ]  # 主分支推送时触发
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [ main, master ]  # PR到主分支时触发
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+env:
+  CARGO_TERM_COLOR: always
+  VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+  VCPKG_BINARY_SOURCES: 'clear;nuget,GitHub,readwrite'
+
+jobs:
+  build-windows-arm64:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      
+      # 设置 Rust 环境
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: aarch64-pc-windows-msvc
+          override: true
+      
+      # 设置 vcpkg
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '2023.04.15'
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+      
+      # 安装 ARM64 依赖
+      - name: Install ARM64 dependencies
+        run: |
+          $env:VCPKG_ROOT="${{ github.workspace }}/vcpkg"
+          & $env:VCPKG_ROOT\vcpkg install libvpx:arm64-windows-static libyuv:arm64-windows-static opus:arm64-windows-static aom:arm64-windows-static
+        shell: pwsh
+      
+      # 使用缓存加速构建
+      - name: Cargo cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-arm64-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-arm64-
+      
+      # 构建 Core (non-GUI) 版本
+      - name: Build ARM64 Core
+        run: |
+          $env:VCPKG_ROOT="${{ github.workspace }}/vcpkg"
+          cargo build --target aarch64-pc-windows-msvc --release
+        shell: pwsh
+      
+      # 设置 Flutter 环境 (可选，如果需要构建 Flutter UI)
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      
+      # 构建 Flutter 版本 (可选)
+      - name: Build Flutter ARM64
+        run: |
+          flutter config --enable-windows-desktop
+          cd flutter
+          flutter build windows --target-platform windows-arm64 --release
+        shell: pwsh
+      
+      # 打包结果
+      - name: Package RustDesk ARM64
+        run: |
+          mkdir -p artifacts/core
+          mkdir -p artifacts/flutter
+          
+          # 拷贝 Core 版本
+          cp target/aarch64-pc-windows-msvc/release/rustdesk.exe artifacts/core/
+          cp target/aarch64-pc-windows-msvc/release/*.dll artifacts/core/ -ErrorAction SilentlyContinue
+          
+          # 拷贝 Flutter 版本 (如果存在)
+          if (Test-Path "flutter/build/windows/arm64/runner/Release") {
+            cp -r flutter/build/windows/arm64/runner/Release/* artifacts/flutter/
+          }
+          
+          # 创建压缩包
+          Compress-Archive -Path artifacts/core/* -DestinationPath rustdesk-windows-arm64-core.zip
+          if (Test-Path "artifacts/flutter/*") {
+            Compress-Archive -Path artifacts/flutter/* -DestinationPath rustdesk-windows-arm64-flutter.zip
+          }
+        shell: pwsh
+      
+      # 上传构建结果
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: rustdesk-windows-arm64
+          path: |
+            rustdesk-windows-arm64-core.zip
+            rustdesk-windows-arm64-flutter.zip
+          retention-days: 7
+      
+      
